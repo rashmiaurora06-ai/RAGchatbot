@@ -58,10 +58,31 @@ with st.sidebar:
 
 st.title("Telecom Customer Care Assistant")
 
+@st.cache_resource(show_spinner=False)
+def build_knowledge_base(names: tuple[str, ...]) -> None:
+    """Build any empty collections from data/. Runs once per server process, so a fresh
+    deploy (where chroma_store/ isn't in git) works without running ingest_all.py by hand."""
+    import ingest_faq
+    import ingest_guides
+    import ingest_tickets
+
+    ingesters = {"faq": ingest_faq.main, "tickets": ingest_tickets.main, "guides": ingest_guides.main}
+    for name in names:
+        ingesters[name]()
+
+
 missing = missing_collections()
 if missing:
-    st.error(f"The knowledge base is empty ({', '.join(missing)}). Run `python ingest_all.py` first.")
-    st.stop()
+    with st.spinner("Setting up the knowledge base for the first time. This takes a minute or two…"):
+        try:
+            build_knowledge_base(tuple(missing))
+        except Exception as e:  # noqa: BLE001 - show the operator what went wrong
+            st.error(f"Couldn't build the knowledge base: {e}")
+            st.stop()
+    missing = missing_collections()
+    if missing:
+        st.error(f"The knowledge base is still empty ({', '.join(missing)}). Run `python ingest_all.py`.")
+        st.stop()
 
 if not st.session_state.messages:
     st.info("Hi! Ask me about mobile data, bills, SIM/eSIM, roaming, calls or the MyTelecom app. "
