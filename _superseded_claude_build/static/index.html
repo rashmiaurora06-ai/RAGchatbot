@@ -1,0 +1,186 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>NovaCell Support</title>
+<style>
+:root {
+  --bg: #f4f6fb; --panel: #ffffff; --ink: #172033; --muted: #5b6478; --line: #e2e6ef;
+  --brand: #3b3bd1; --brand-ink: #ffffff; --bot: #f1f3f9; --user: #3b3bd1; --user-ink: #fff;
+  --warn-bg: #fff6e5; --warn-ink: #7a4b00; --ok-bg: #e8f7ee; --ok-ink: #12663a; --chip: #eef0fb;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #0f1320; --panel: #171c2c; --ink: #e8ebf4; --muted: #9aa3b8; --line: #2a3147;
+    --brand: #7b7bff; --bot: #1f2538; --user: #5555e0; --chip: #242b42;
+    --warn-bg: #3a2c10; --warn-ink: #ffd48a; --ok-bg: #12301f; --ok-ink: #8fe0b0;
+  }
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--ink);
+  font: 15px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+.app { max-width: 760px; margin: 0 auto; min-height: 100vh; display: flex; flex-direction: column;
+  background: var(--panel); border-left: 1px solid var(--line); border-right: 1px solid var(--line); }
+header { display: flex; align-items: center; gap: 12px; padding: 14px 16px; border-bottom: 1px solid var(--line); }
+.logo { width: 34px; height: 34px; border-radius: 10px; background: var(--brand); color: var(--brand-ink);
+  display: grid; place-items: center; font-weight: 700; }
+header h1 { font-size: 16px; margin: 0; }
+header .sub { font-size: 12px; color: var(--muted); }
+header button { margin-left: auto; }
+button { font: inherit; cursor: pointer; border-radius: 999px; border: 1px solid var(--line);
+  background: var(--panel); color: var(--ink); padding: 6px 12px; }
+button.primary { background: var(--brand); color: var(--brand-ink); border-color: var(--brand); }
+button:focus-visible, textarea:focus-visible { outline: 3px solid var(--brand); outline-offset: 2px; }
+#log { flex: 1; overflow-y: auto; padding: 16px; display: flex; flex-direction: column; gap: 14px; }
+.msg { max-width: 88%; padding: 10px 14px; border-radius: 16px; white-space: pre-wrap; word-wrap: break-word; }
+.bot { background: var(--bot); align-self: flex-start; border-bottom-left-radius: 4px; }
+.user { background: var(--user); color: var(--user-ink); align-self: flex-end; border-bottom-right-radius: 4px; }
+.meta { margin-top: 8px; display: flex; flex-wrap: wrap; gap: 6px; align-items: center; font-size: 12px; color: var(--muted); white-space: normal; }
+details.src { margin-top: 8px; font-size: 13px; white-space: normal; }
+details.src summary { cursor: pointer; color: var(--muted); }
+details.src li { margin: 6px 0; }
+details.src .snip { color: var(--muted); font-size: 12px; white-space: pre-wrap; }
+.box { margin-top: 8px; padding: 8px 10px; border-radius: 10px; font-size: 13px; white-space: normal; }
+.box.warn { background: var(--warn-bg); color: var(--warn-ink); }
+.box.ok { background: var(--ok-bg); color: var(--ok-ink); }
+.chips { display: flex; flex-wrap: wrap; gap: 8px; }
+.chip { background: var(--chip); border-color: transparent; font-size: 13px; }
+.thumb { padding: 2px 8px; font-size: 13px; }
+.thumb[aria-pressed="true"] { background: var(--brand); color: var(--brand-ink); }
+.typing { color: var(--muted); font-style: italic; }
+form { display: flex; gap: 8px; padding: 12px 16px; border-top: 1px solid var(--line); }
+textarea { flex: 1; resize: none; font: inherit; padding: 10px 12px; border-radius: 12px;
+  border: 1px solid var(--line); background: var(--panel); color: var(--ink); min-height: 44px; max-height: 140px; }
+.foot { text-align: center; font-size: 11px; color: var(--muted); padding: 0 16px 10px; }
+.badge { font-size: 11px; padding: 1px 8px; border-radius: 999px; background: var(--warn-bg); color: var(--warn-ink); }
+@media (max-width: 600px) { .msg { max-width: 94%; } header .sub { display: none; } }
+</style>
+</head>
+<body>
+<div class="app">
+  <header>
+    <div class="logo" aria-hidden="true">N</div>
+    <div>
+      <h1>NovaCell Support <span id="mode" class="badge" hidden>offline mode</span></h1>
+      <div class="sub">AI assistant · answers from NovaCell help content only</div>
+    </div>
+    <button id="human" type="button" title="Connect to a NovaCell agent">Talk to a person</button>
+  </header>
+  <main id="log" aria-live="polite"></main>
+  <form id="f">
+    <label for="q" class="visually-hidden" style="position:absolute;left:-9999px">Your question</label>
+    <textarea id="q" rows="1" placeholder="Ask about data, bills, SIM/eSIM, roaming, calls…" maxlength="2000"></textarea>
+    <button class="primary" type="submit">Send</button>
+  </form>
+  <div class="foot">AI-generated answers can be wrong. Never share passwords, PINs or card numbers in chat.</div>
+</div>
+<script>
+const log = document.getElementById('log'), q = document.getElementById('q'), form = document.getElementById('f');
+let sessionId = null, busy = false, handedOff = false;
+
+function el(tag, cls, text) { const e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; }
+function scroll() { log.scrollTop = log.scrollHeight; }
+
+async function api(path, body) {
+  const r = await fetch(path, body ? { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) } : {});
+  if (!r.ok) throw new Error(await r.text());
+  return r.json();
+}
+
+function addUser(text) { log.appendChild(el('div', 'msg user', text)); scroll(); }
+
+function addBot(text, extra) {
+  const m = el('div', 'msg bot', text);
+  if (extra) m.appendChild(extra);
+  log.appendChild(m); scroll(); return m;
+}
+
+function chips(list, onClick) {
+  const c = el('div', 'chips');
+  list.forEach(s => { const b = el('button', 'chip', s.label || s); b.type = 'button'; b.onclick = () => onClick(s); c.appendChild(b); });
+  return c;
+}
+
+function offerBox(kind) {
+  const copy = {
+    account_review: 'I can’t see or change your account here. Want an agent to look at it with you?',
+    staff_action: 'This needs a NovaCell agent to fix. Want me to connect you?',
+    frustration: 'Sorry this is taking a while. Would you like to talk to a person?',
+    unsure: 'Would you like to talk to a person instead?',
+    emergency: 'If you need NovaCell support afterwards, I can connect you to a person.',
+  }[kind] || 'Would you like to talk to a person?';
+  const box = el('div', 'box warn');
+  box.appendChild(el('div', null, copy));
+  const b = el('button', 'primary', 'Connect me'); b.type = 'button'; b.style.marginTop = '6px';
+  b.onclick = () => { b.disabled = true; doHandoff(kind); };
+  box.appendChild(b);
+  return box;
+}
+
+function render(res) {
+  const extra = el('div');
+  if (res.self_serve) extra.appendChild(el('div', 'box ok', '➜ ' + res.self_serve.text));
+  if (res.related && res.related.length) {
+    const c = chips(res.related.map(r => ({ label: r.label })), s => send(s.label));
+    c.style.marginTop = '8px'; extra.appendChild(c);
+  }
+  if (res.citations && res.citations.length) {
+    const d = el('details', 'src'); d.appendChild(el('summary', null, `Sources (${res.citations.length})`));
+    const ul = el('ul');
+    res.citations.forEach(c => { const li = el('li'); li.appendChild(el('strong', null, c.label)); li.appendChild(el('div', 'snip', c.snippet)); ul.appendChild(li); });
+    d.appendChild(ul); extra.appendChild(d);
+  }
+  if (res.offer_handoff && !handedOff) extra.appendChild(offerBox(res.offer_handoff));
+  if (res.handoff) handedOff = true;
+  if (['answered', 'partial'].includes(res.status)) {
+    const meta = el('div', 'meta'); meta.appendChild(el('span', null, 'Was this helpful?'));
+    ['up', 'down'].forEach(v => {
+      const b = el('button', 'thumb', v === 'up' ? '👍' : '👎'); b.type = 'button';
+      b.setAttribute('aria-label', v === 'up' ? 'Helpful' : 'Not helpful'); b.setAttribute('aria-pressed', 'false');
+      b.onclick = async () => {
+        meta.querySelectorAll('.thumb').forEach(x => { x.disabled = true; });
+        b.setAttribute('aria-pressed', 'true');
+        const r = await api('/api/feedback', { session_id: sessionId, message_id: res.message_id, kind: 'thumb', value: v });
+        if (r.follow_up && !handedOff) addBot(r.follow_up.text, offerBox(r.follow_up.offer_handoff));
+      };
+      meta.appendChild(b);
+    });
+    extra.appendChild(meta);
+  }
+  addBot(res.text, extra);
+}
+
+async function send(text) {
+  text = (text || '').trim(); if (!text || busy) return;
+  busy = true; addUser(text); q.value = '';
+  const t = addBot('Thinking…'); t.classList.add('typing');
+  try {
+    const res = await api('/api/chat', { session_id: sessionId, message: text });
+    sessionId = res.session_id; t.remove(); render(res);
+  } catch (e) {
+    t.remove();
+    addBot('Sorry, something went wrong on our side. You can try again, or talk to a person.', offerBox('unsure'));
+  } finally { busy = false; q.focus(); }
+}
+
+async function doHandoff(reason) {
+  try {
+    const h = await api('/api/handoff', { session_id: sessionId, reason: reason || 'customer_requested' });
+    handedOff = true; addBot(h.message);
+  } catch (e) { addBot('I couldn’t reach the agent queue. Please call 611 (free from your mobile).'); }
+}
+
+form.onsubmit = e => { e.preventDefault(); send(q.value); };
+q.addEventListener('keydown', e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(q.value); } });
+document.getElementById('human').onclick = () => { if (!sessionId) return; addUser('Talk to a person'); doHandoff('customer_requested'); };
+
+(async () => {
+  const w = await api('/api/welcome'); sessionId = w.session_id;
+  if (w.mode === 'offline') document.getElementById('mode').hidden = false;
+  const c = chips(w.suggestions, s => send(s)); c.style.marginTop = '10px';
+  addBot(w.text, c);
+})();
+</script>
+</body>
+</html>

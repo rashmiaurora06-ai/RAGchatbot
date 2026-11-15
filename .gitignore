@@ -1,0 +1,9 @@
+.venv/
+.env
+chroma_store/
+logs/
+__pycache__/
+.DS_Store
+*.pyc
+_superseded_claude_build/runtime/
+.claude/settings.local.json

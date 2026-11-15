@@ -1,0 +1,135 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>NovaCell Ops Console</title>
+<style>
+:root { --bg:#f4f6fb; --panel:#fff; --ink:#172033; --muted:#5b6478; --line:#e2e6ef; --brand:#3b3bd1; --warn:#a15c00; }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
+  --bg:#0f1320; --panel:#171c2c; --ink:#e8ebf4; --muted:#9aa3b8; --line:#2a3147; --brand:#7b7bff; --warn:#ffc46b; } }
+* { box-sizing: border-box; }
+body { margin:0; background:var(--bg); color:var(--ink); font:14px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+.wrap { max-width:1100px; margin:0 auto; padding:16px; }
+h1 { font-size:20px; margin:0 0 12px; }
+nav { display:flex; gap:8px; flex-wrap:wrap; margin-bottom:16px; }
+button, input, select, textarea { font:inherit; color:var(--ink); background:var(--panel); border:1px solid var(--line); border-radius:8px; padding:6px 10px; }
+button { cursor:pointer; } button.on, button.primary { background:var(--brand); border-color:var(--brand); color:#fff; }
+.card { background:var(--panel); border:1px solid var(--line); border-radius:12px; padding:14px; margin-bottom:12px; overflow-x:auto; }
+.kpis { display:grid; grid-template-columns:repeat(auto-fit,minmax(160px,1fr)); gap:12px; }
+.kpi .v { font-size:24px; font-weight:600; } .kpi .l { color:var(--muted); font-size:12px; }
+table { width:100%; border-collapse:collapse; } th, td { text-align:left; padding:6px 8px; border-bottom:1px solid var(--line); vertical-align:top; }
+th { color:var(--muted); font-weight:500; font-size:12px; }
+textarea { width:100%; min-height:80px; } input.w { width:100%; }
+.row { display:grid; grid-template-columns:1fr 1fr; gap:10px; } @media (max-width:600px){ .row{grid-template-columns:1fr;} }
+.muted { color:var(--muted); } .warn { color:var(--warn); }
+pre { white-space:pre-wrap; font-size:12px; margin:0; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>NovaCell Assistant · Ops Console</h1>
+  <div class="card" id="login">
+    <label>Ops token (printed in the server log at startup) <input id="tok" type="password" autocomplete="off"></label>
+    <button class="primary" id="go">Open</button> <span id="err" class="warn"></span>
+  </div>
+  <div id="main" hidden>
+    <nav id="tabs"></nav>
+    <section id="view"></section>
+  </div>
+</div>
+<script>
+let TOKEN = '';
+try { TOKEN = sessionStorage.getItem('nc_tok') || ''; } catch (e) {}
+const $ = id => document.getElementById(id);
+const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+async function api(path, body) {
+  const r = await fetch(path, { method: body ? 'POST' : 'GET', headers: { 'Content-Type': 'application/json', 'X-Admin-Token': TOKEN }, body: body ? JSON.stringify(body) : undefined });
+  if (!r.ok) throw new Error((await r.json().catch(() => ({}))).detail || r.statusText);
+  return r.json();
+}
+const TABS = { Overview: overview, Content: content, 'Content gaps': gaps, Handoffs: handoffs };
+let current = 'Overview';
+function tabs() {
+  $('tabs').innerHTML = '';
+  Object.keys(TABS).forEach(t => { const b = document.createElement('button'); b.textContent = t; if (t === current) b.className = 'on'; b.onclick = () => { current = t; show(); }; $('tabs').appendChild(b); });
+}
+async function show() { tabs(); try { $('view').innerHTML = await TABS[current](); bind(); } catch (e) { $('view').innerHTML = `<div class="card warn">${esc(e.message)}</div>`; } }
+
+async function overview() {
+  const m = await api('/api/admin/metrics');
+  const k = (v, l) => `<div class="card kpi"><div class="v">${esc(v)}</div><div class="l">${esc(l)}</div></div>`;
+  const pct = v => v == null ? '–' : Math.round(v * 100) + '%';
+  const st = m.status_counts || {};
+  return `<div class="kpis">${k(m.conversations, 'Conversations')}${k(pct(m.containment_rate), 'Containment (no handoff)')}
+    ${k(st.answered || 0, 'Answered')}${k(st.unsure || 0, '“Not sure” replies')}${k(m.open_gaps, 'Open content gaps')}
+    ${k(m.never_cited_count, 'Sources never cited')}${k(m.mode, 'Answer mode')}</div>
+    <div class="row"><div class="card"><b>Handoffs by reason</b><pre>${esc(JSON.stringify(m.handoffs_by_reason, null, 2))}</pre></div>
+    <div class="card"><b>Feedback</b><pre>${esc(JSON.stringify(m.feedback, null, 2))}</pre></div>
+    <div class="card"><b>Themes</b><pre>${esc(JSON.stringify(m.theme_counts, null, 2))}</pre></div>
+    <div class="card"><b>Most-cited sources</b><pre>${esc(m.top_cited.map(([i, n]) => i + ': ' + n).join('\n') || '–')}</pre></div></div>`;
+}
+
+async function content() {
+  const c = await api('/api/admin/content');
+  const drafts = c.drafts.map(d => `<tr><td>${esc(d.source_id)}</td><td><b>${esc(d.question)}</b><br>${esc(d.answer)}</td><td>${esc(d.category)}</td><td>${esc(d.author)}</td>
+    <td><input placeholder="approver name" data-appr="${d.id}"><button data-pub="${d.id}">Approve &amp; publish</button></td></tr>`).join('');
+  const live = c.live.map(f => `<tr><td>${esc(f.id)}${f.ops_edited ? ' <span class="muted">(edited)</span>' : ''}</td><td><b>${esc(f.question)}</b><br><span class="muted">${esc(f.answer)}</span></td><td>${esc(f.category)}</td>
+    <td><button data-edit="${esc(f.id)}">Edit</button> <button data-retire="${esc(f.id)}">Retire</button></td></tr>`).join('');
+  window._live = c.live;
+  return `<div class="card"><b>New or edited FAQ entry (saved as a draft)</b>
+    <div class="row"><input class="w" id="d_sid" placeholder="Source ID to replace (blank = new entry)"><input class="w" id="d_cat" placeholder="Category (data, billing, sim, roaming, voice, device, account, connectivity)"></div>
+    <p><input class="w" id="d_q" placeholder="Customer question"></p><textarea id="d_a" placeholder="Approved answer"></textarea>
+    <p><input id="d_author" placeholder="Your name"> <button class="primary" id="d_save">Save draft</button> <span id="d_msg" class="muted"></span></p>
+    <p class="muted">Drafts go live only after a different person approves them. Published changes reach the assistant immediately.</p></div>
+    <div class="card"><b>Drafts awaiting approval</b><table><tr><th>ID</th><th>Entry</th><th>Category</th><th>Author</th><th></th></tr>${drafts || '<tr><td colspan=5 class="muted">None</td></tr>'}</table></div>
+    <div class="card"><b>Live FAQ content</b><table><tr><th>ID</th><th>Entry</th><th>Category</th><th></th></tr>${live}</table></div>`;
+}
+
+async function gaps() {
+  const g = await api('/api/admin/gaps');
+  return `<div class="card"><b>Questions the assistant couldn't answer</b> <span class="muted">– add content for these, then mark resolved</span>
+    <table><tr><th>When</th><th>Question</th><th>Theme</th><th>Reason</th><th></th></tr>
+    ${g.map(x => `<tr><td>${new Date(x.created_at * 1000).toLocaleString()}</td><td>${esc(x.question)}</td><td>${esc(x.theme)}</td><td>${esc(x.reason)}</td><td><button data-gap="${x.id}">Resolved</button></td></tr>`).join('') || '<tr><td colspan=5 class="muted">No open gaps</td></tr>'}</table></div>`;
+}
+
+async function handoffs() {
+  const h = await api('/api/admin/handoffs');
+  return h.map(x => `<div class="card"><b>${esc(x.ref)}</b> · ${esc(x.reason)} · queue: ${esc(x.package.queue)} · ${esc(x.channel)} · ${new Date(x.created_at * 1000).toLocaleString()}
+    <details><summary>Transcript (${x.package.transcript.length} turns)</summary><pre>${esc(x.package.transcript.map(t => t.role.toUpperCase() + ': ' + t.content).join('\n\n'))}</pre></details></div>`).join('') || '<div class="card muted">No handoffs yet</div>';
+}
+
+function bind() {
+  document.querySelectorAll('[data-pub]').forEach(b => b.onclick = async () => {
+    const id = b.dataset.pub, approver = document.querySelector(`[data-appr="${id}"]`).value.trim();
+    try { await api(`/api/admin/content/${id}/publish`, { approver }); show(); } catch (e) { alert(e.message); }
+  });
+  document.querySelectorAll('[data-edit]').forEach(b => b.onclick = () => {
+    const f = window._live.find(x => x.id === b.dataset.edit);
+    $('d_sid').value = f.id; $('d_cat').value = f.category; $('d_q').value = f.question; $('d_a').value = f.answer; window.scrollTo(0, 0);
+  });
+  document.querySelectorAll('[data-retire]').forEach(b => b.onclick = async () => {
+    const approver = prompt(`Retire ${b.dataset.retire}? Enter approver name:`); if (!approver) return;
+    await api('/api/admin/content/retire', { source_id: b.dataset.retire, approver }); show();
+  });
+  document.querySelectorAll('[data-gap]').forEach(b => b.onclick = async () => { await api(`/api/admin/gaps/${b.dataset.gap}/resolve`, {}); show(); });
+  const save = $('d_save');
+  if (save) save.onclick = async () => {
+    try {
+      await api('/api/admin/content/draft', { source_id: $('d_sid').value.trim() || null, category: $('d_cat').value.trim(), question: $('d_q').value.trim(), answer: $('d_a').value.trim(), author: $('d_author').value.trim() });
+      show();
+    } catch (e) { $('d_msg').textContent = e.message; }
+  };
+}
+
+async function login() {
+  TOKEN = $('tok').value.trim() || TOKEN;
+  try { await api('/api/admin/metrics'); try { sessionStorage.setItem('nc_tok', TOKEN); } catch (e) {}
+    $('login').hidden = true; $('main').hidden = false; show(); }
+  catch (e) { $('err').textContent = 'Invalid token'; }
+}
+$('go').onclick = login;
+if (TOKEN) login();
+</script>
+</body>
+</html>
