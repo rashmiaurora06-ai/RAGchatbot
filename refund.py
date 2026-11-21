@@ -9,6 +9,11 @@ import uuid
 APPROVAL_LIMIT = 100       # FR-36: refunds of $100 or less need user confirmation; above go to support
 REFUND_WINDOW_DAYS = 7     # FR-25
 
+# How a processed refund is paid out. A bill credit is held on the account for future bills.
+ORIGINAL_PAYMENT = "original_payment"
+BILL_CREDIT = "bill_credit"
+METHOD_LABELS = {ORIGINAL_PAYMENT: "refund to original payment method", BILL_CREDIT: "credit to future bills"}
+
 # The hard-coded user stands in for the signed-in session user (FR-15, FR-16).
 DEMO_USER_ID = "user_123"
 
@@ -18,6 +23,7 @@ USERS = {
         "name": "Rahul",
         "plan": "Unlimited Plus",
         "plan_amount": 100,
+        "bill_credit_balance": 0,
         "recharges": [
             {"recharge_id": "rch_456", "recharge_amount": 150, "recharge_status": "completed",
              "recharge_age_days": 2, "refund_status": "not_refunded"},
@@ -29,6 +35,7 @@ USERS = {
         "name": "Priya",
         "plan": "Unlimited Starter",
         "plan_amount": 50,
+        "bill_credit_balance": 0,
         "recharges": [
             {"recharge_id": "rch_610", "recharge_amount": 50, "recharge_status": "completed",
              "recharge_age_days": 15, "refund_status": "not_refunded"},
@@ -75,6 +82,12 @@ class AccountStore:
         self.users = copy.deepcopy(USERS)
         self.support_requests: list[dict] = []
 
+    def saved(self, user_id: str) -> None:
+        """Called after an account changes. The database-backed store (db.DbAccountStore) persists it."""
+
+    def record_support_request(self, user_id: str, request: dict) -> None:
+        self.support_requests.append(request)
+
 
 class RefundTools:
     """The four refund tools (FR-19 to FR-21a). Each returns a plain dict (FR-22).
@@ -95,6 +108,7 @@ class RefundTools:
         a = self._account(user_id)
         return {
             "user_id": user_id, "name": a["name"], "plan": a["plan"], "plan_amount": a["plan_amount"],
+            "bill_credit_balance": a["bill_credit_balance"],
             "recharges": [{**r, "refundable_now": is_refundable(r)} for r in a["recharges"]],
         }
 
@@ -129,27 +143,40 @@ class RefundTools:
             return {**result, "eligible": True, "reason": "Refund is eligible."}
         return {**result, "reason": reason}
 
-    def process_refund(self, user_id: str, amount) -> dict:
-        """Simulated refund (FR-23). Re-validates so it can never run on an invalid request (GR-01)."""
+    def process_refund(self, user_id: str, amount, method: str = ORIGINAL_PAYMENT) -> dict:
+        """Simulated refund (FR-23). Re-validates so it can never run on an invalid request (GR-01).
+
+        method: ORIGINAL_PAYMENT, or BILL_CREDIT to hold the amount as a credit for future bills.
+        """
+        if method not in METHOD_LABELS:
+            return {"success": False, "reason": f"Unknown refund method {method!r}."}
         check = self.validate_refund(user_id, amount)
         if not check["eligible"]:
             return {"success": False, "reason": check["reason"]}
         if check["requested_amount"] > APPROVAL_LIMIT:  # GR-08
             return {"success": False, "reason": "Refunds above the approval limit can't be processed here."}
-        for r in self._account(user_id)["recharges"]:
+        account = self._account(user_id)
+        for r in account["recharges"]:
             if r["recharge_id"] == check["recharge_id"]:
                 r["refund_status"] = "refunded"  # FR-28a: the refund consumes the whole recharge
+        if method == BILL_CREDIT:
+            account["bill_credit_balance"] = _num(account["bill_credit_balance"] + check["requested_amount"])
+        self.store.saved(user_id)
         return {"success": True, "refund_id": f"ref_{uuid.uuid4().hex[:6]}",
                 "amount": check["requested_amount"], "recharge_id": check["recharge_id"],
-                "status": "refunded"}
+                "method": method, "status": "credited" if method == BILL_CREDIT else "refunded",
+                "bill_credit_balance": account["bill_credit_balance"]}
 
-    def submit_to_support(self, user_id: str, amount) -> dict:
-        """FR-38: hand a refund above the limit to the Support Team. Refund status is left unchanged."""
+    def submit_to_support(self, user_id: str, amount, preferred_method: str = ORIGINAL_PAYMENT) -> dict:
+        """FR-38: hand a refund above the limit to the Support Team. Refund status is left unchanged.
+        The customer's preferred method is passed along; Support decides, the app applies nothing."""
+        if preferred_method not in METHOD_LABELS:
+            return {"submitted": False, "reason": f"Unknown refund method {preferred_method!r}."}
         check = self.validate_refund(user_id, amount)
         if not check["eligible"]:
             return {"submitted": False, "reason": check["reason"]}
         request = {"request_id": f"sup_{uuid.uuid4().hex[:6]}", "user_id": user_id,
                    "amount": check["requested_amount"], "recharge_id": check["recharge_id"],
-                   "status": "submitted_for_review"}
-        self.store.support_requests.append(request)
+                   "preferred_method": preferred_method, "status": "submitted_for_review"}
+        self.store.record_support_request(user_id, request)
         return {"submitted": True, **request}

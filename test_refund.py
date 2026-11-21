@@ -75,16 +75,33 @@ def test_state_machine_needs_confirmation():
     assert t.get_user_account(U)["recharges"][1]["refund_status"] == "refunded"
 
 
-def test_offered_amount_above_limit_needs_a_yes():
+def test_bill_credit_option():
     t = fresh()
     a = RefundAgent(t, U)
-    a.episode_messages = ["I want a refund."]
-    reply = a._offer_amount(150, [])
-    assert reply.state == "awaiting_amount" and not t.store.support_requests  # nothing submitted yet
-    assert a.handle("Cancel").state == "refund_cancelled" and not t.store.support_requests
-    a.state, a.offered_amount = "awaiting_amount", 150
-    assert a.handle("Yes, proceed").state == "refund_submitted_for_review"
-    assert len(t.store.support_requests) == 1
+    a._after_validation(100, [])
+    reply = a.resolve("Credit to future bills")
+    assert reply.state == "refund_processed" and "credit" in reply.text, reply.text
+    acct = t.get_user_account(U)
+    assert acct["bill_credit_balance"] == 100 and acct["recharges"][1]["refund_status"] == "refunded"
+    assert t.process_refund(U, 150, "bill_credit")["success"] is False   # still capped at $100
+    assert parse_confirmation("credit to future bills") == "credit"
+    assert parse_confirmation("Refund to original payment") == "yes"
+
+
+def test_over_limit_asks_preference_before_support():
+    t = fresh()
+    a = RefundAgent(t, U)
+    reply = a._after_validation(150, [], offered=True)
+    assert reply.state == "awaiting_refund_method" and not t.store.support_requests   # nothing sent yet
+    assert "still refundable" in reply.text
+    assert a.resolve("maybe").state == "awaiting_refund_method"                     # ambiguous: re-ask
+    assert a.resolve("Cancel").state == "refund_cancelled" and not t.store.support_requests
+    a._after_validation(150, [])
+    assert a.resolve("Credit to future bills").state == "refund_submitted_for_review"
+    req = t.store.support_requests[0]
+    assert req["preferred_method"] == "bill_credit"
+    assert t.get_user_account(U)["bill_credit_balance"] == 0                         # Support decides
+    assert t.get_user_account(U)["recharges"][0]["refund_status"] == "not_refunded"
 
 
 if __name__ == "__main__":

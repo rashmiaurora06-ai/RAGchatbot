@@ -301,6 +301,18 @@ Which amount would you like refunded?
 ```
 ---
 
+### 6.8a Refund Method
+
+| ID     | Requirement |
+| ------ | ----------- |
+| FR-44a | An eligible refund of $100 or less can be paid back to the original payment method or held as a credit on future bills; the customer chooses at the confirmation step |
+| FR-44b | "Yes, proceed" means a refund to the original payment method |
+| FR-44c | A bill credit updates the simulated account's bill credit balance |
+| FR-44d | For refunds above $100, the agent asks which method the customer prefers before submitting to the Support Team, and sends that preference with the request. Nothing is submitted until the customer answers; Cancel submits nothing |
+| FR-44e | The application never applies a bill credit for a request sent to the Support Team |
+
+---
+
 ### 6.9 Conversation Context
 
 | ID    | Requirement |
@@ -567,8 +579,8 @@ Do you want to proceed with this refund?
 
 If buttons are difficult to integrate with the existing chat flow, explicit natural-language confirmation may be used.
 
-For a refund above $100, show no confirmation step. There is nothing for the user to
-approve, so the agent reports the submission and the turn ends.
+For a refund above $100, ask which refund method the customer prefers (FR-44d), then submit the
+request to the Support Team and report the submission.
 
 Clear conversation must reset the conversation history and any pending refund.
 

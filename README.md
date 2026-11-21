@@ -83,6 +83,32 @@ CLI (type `quit` to exit):
 3. The answer streams token by token. A **Sources** expander lists all 9 retrieved documents.
 4. 👍 / 👎 ratings, questions, answers, sources and latency are written to `logs/interactions.jsonl`.
 
+## Accounts and chat history
+
+Customers sign in before chatting. **Create account** asks for a name, email and a password of at
+least 8 characters. Everything is stored in a local SQLite database, `data/app.db`, which is created
+on first start and is not committed to git (set `APP_DB` to use another file).
+
+| Table | What it holds |
+|---|---|
+| `users` | Name, email (unique), salted scrypt password hash, created and last sign-in times |
+| `billing_accounts` | Each customer's simulated plan, recharges and bill credit balance |
+| `support_requests` | Refund requests sent to the Support Team, with the preferred refund method |
+| `conversations` / `messages` | Every chat: questions, answers, sources, agent steps and 👍/👎 ratings |
+
+- The sidebar has **New chat**, your saved chats (click one to reopen it), **Delete this chat**,
+  **Your account** (plan, recharges, bill credit, change password) and **Sign out**.
+- Each new customer gets their own simulated billing account with $150 and $100 recharges, so
+  refunds made by one customer never affect another.
+- You stay signed in until you sign out or reload the page.
+- The CLI (`main.py`) doesn't sign in; it uses an in-memory demo account.
+
+Database tests (they use a temporary database):
+
+```bash
+.venv/bin/python test_db.py
+```
+
 ## Refund Agent (agentic capability)
 
 Built to [agent_PRD.md](agent_PRD.md). Every message first goes through **intent detection**
@@ -97,8 +123,8 @@ The agent is an LLM tool-calling loop that can call only `get_user_account` and
 | Outcome | What happens |
 |---|---|
 | Not eligible (too old, already refunded, more than the recharge, ≤ 0) | Rejected with the reason |
-| Eligible, $100 or less | Confirmation card (**Confirm Refund** / **Cancel**, or type "Yes, proceed"), then `process_refund` |
-| Eligible, above $100 | `submit_to_support`, the user is told Support will review it, turn ends |
+| Eligible, $100 or less | Confirmation card: **Refund to original payment**, **Credit to future bills** or **Cancel**, then `process_refund` |
+| Eligible, above $100 | Asks which method the customer prefers, then `submit_to_support` with that preference |
 
 Guardrails live in code, not the prompt. `refund.py` holds the rules, the $100 limit, the
 simulated accounts and all four tools. `process_refund` and `submit_to_support` are never
@@ -107,9 +133,11 @@ from `awaiting_confirmation` after an exact "yes" phrase; anything ambiguous get
 The agent may only use an amount the customer actually typed, or the single refundable
 recharge when they gave none.
 
-- The demo user is `user_123` (Rahul: $150 and $100 recharges). The sidebar can switch to
-  `user_234`, whose $50 recharge is 15 days old, to demo the 7-day window.
-- Refunds are simulated and stored per browser session. No billing system is called.
+- In the app, refunds use the signed-in customer's own billing account. The CLI and tests use
+  the in-memory demo users `user_123` ($150 and $100 recharges) and `user_234` (a $50 recharge
+  15 days old, for the 7-day window).
+- Refunds are simulated and saved to the customer's billing account in the database. No billing
+  system is called.
 - The last 4 exchanges are passed as context to both routes. Retrieval still uses only the
   current question. **Clear conversation** resets the history and any pending refund.
 - Each refund answer has an **Agent steps** expander (`[Intent] …`, `[Agent] validate_refund(…)`, …).

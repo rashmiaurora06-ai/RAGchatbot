@@ -30,9 +30,9 @@ class Turn:
 
 
 class Assistant:
-    def __init__(self, user_id: str = DEMO_USER_ID):
-        self.user_id = user_id  # stands in for the authenticated session user (FR-16)
-        self.tools = RefundTools(AccountStore())
+    def __init__(self, user_id: str = DEMO_USER_ID, store: AccountStore | None = None):
+        self.user_id = user_id  # the signed-in user's account key (FR-16)
+        self.tools = RefundTools(store or AccountStore())
         self.agent = RefundAgent(self.tools, user_id)
 
     def reset(self) -> None:
@@ -47,8 +47,6 @@ class Assistant:
         # A clear yes/no while a refund is waiting goes straight to the agent's state machine.
         if self.agent.awaiting_confirmation and parse_confirmation(message):
             return self._refund_turn(self.agent.resolve(message), ["[Intent] refund_confirmation"])
-        if self.agent.offered_amount is not None and parse_confirmation(message):
-            return self._refund_turn(self.agent.handle(message, history), ["[Intent] refund_confirmation"])
 
         intent = classify(message, history)
         steps = [f"[Intent] {intent}"]

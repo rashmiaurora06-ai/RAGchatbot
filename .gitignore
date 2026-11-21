@@ -7,3 +7,4 @@ __pycache__/
 *.pyc
 _superseded_claude_build/runtime/
 .claude/settings.local.json
+data/app.db

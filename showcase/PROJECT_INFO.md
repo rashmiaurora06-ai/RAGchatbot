@@ -41,12 +41,12 @@ approved content.
 ![Sources expanded](chat-sources.jpg)
 
 ## How the refund agent works
-1. Ask for a refund, e.g. "I want a refund of ₹499." The agent looks up the account, checks the
-   refund rules in code, and shows a Confirm Refund / Cancel card for amounts of ₹499 or less.
+1. Ask for a refund, e.g. "I want a refund of $100." The agent looks up the account, checks the
+   refund rules in code, and shows a Confirm Refund / Cancel card for amounts of $100 or less.
 
 ![Refund confirmation card](refund-1-confirm.jpg)
 
 2. Open **Agent steps** to see every tool call and the validation result. Nothing is refunded
-   until you confirm. Amounts above ₹499 go to the Support Team for review instead.
+   until you confirm. Amounts above $100 go to the Support Team for review instead.
 
 ![Agent steps](refund-2-agent-steps.jpg)

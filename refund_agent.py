@@ -15,7 +15,8 @@ from langchain_core.messages import SystemMessage, ToolMessage
 from langchain_core.tools import tool
 
 from chain import get_llm, strip_think, to_messages
-from refund import APPROVAL_LIMIT, RefundTools, is_refundable, dollars
+from refund import (APPROVAL_LIMIT, BILL_CREDIT, METHOD_LABELS, ORIGINAL_PAYMENT, RefundTools, dollars,
+                    is_refundable)
 
 log = logging.getLogger("assistant")
 
@@ -23,6 +24,8 @@ log = logging.getLogger("assistant")
 REFUND_REQUESTED = "refund_requested"
 REFUND_VALIDATED = "refund_validated"
 AWAITING_CONFIRMATION = "awaiting_confirmation"
+AWAITING_METHOD = "awaiting_refund_method"  # over the limit: how they'd like it, before Support review
+WAITING_FOR_USER = (AWAITING_CONFIRMATION, AWAITING_METHOD)
 AWAITING_AMOUNT = "awaiting_amount"
 REFUND_CONFIRMED = "refund_confirmed"
 REFUND_PROCESSED = "refund_processed"
@@ -32,6 +35,7 @@ REFUND_SUBMITTED = "refund_submitted_for_review"
 
 MAX_TOOL_ROUNDS = 4
 HELP = "If you need more help, call 611 (free from your mobile) or use the MyTelecom app."
+CHOICES = "Reply **Refund to original payment**, **Credit to future bills** or **Cancel**."
 
 
 # Schemas the LLM sees. The user ID is never an LLM argument: it comes from the session (FR-17, GR-03).
@@ -66,17 +70,26 @@ Your only job is to work out the refund amount and call the tools:
 Keep replies short and friendly. Amounts are in US dollars; write them like $100."""
 
 _YES = {"yes", "y", "yes proceed", "yes please", "yes please proceed", "proceed", "confirm",
-        "confirm refund", "yes confirm", "go ahead", "yes go ahead", "ok proceed", "okay proceed"}
+        "confirm refund", "yes confirm", "go ahead", "yes go ahead", "ok proceed", "okay proceed",
+        "refund to original payment", "original payment", "yes refund to original payment",
+        "refund to original payment method", "original payment method", "refund to my card"}
+_CREDIT = {"credit", "bill credit", "credit to future bills", "yes credit to future bills",
+           "credit to my bill", "credit my bill", "credit my account", "apply to my bill",
+           "apply to future bills", "apply it to my bill", "apply it to future bills", "yes bill credit",
+           "future bills", "credit future bills"}
 _NO = {"no", "n", "cancel", "cancel refund", "no cancel", "no thanks", "no thank you", "stop",
        "dont", "do not", "dont proceed", "do not proceed", "no dont"}
 
 
 def parse_confirmation(text: str) -> str | None:
-    """FR-36c, FR-36e: 'yes', 'no', or None for anything ambiguous. Exact phrases only."""
+    """FR-36c, FR-36e: 'yes' (refund to original payment), 'credit' (credit to future bills),
+    'no', or None for anything ambiguous. Exact phrases only."""
     norm = re.sub(r"[^a-z ]", "", text.lower().replace("'", "")).strip()
     norm = re.sub(r"\s+", " ", norm)
     if norm in _YES:
         return "yes"
+    if norm in _CREDIT:
+        return "credit"
     if norm in _NO:
         return "no"
     return None
@@ -95,7 +108,7 @@ class AgentReply:
 
     @property
     def awaiting_confirmation(self) -> bool:
-        return self.state == AWAITING_CONFIRMATION
+        return self.state in WAITING_FOR_USER
 
 
 class RefundAgent:
@@ -108,12 +121,12 @@ class RefundAgent:
         """Clear any pending refund (UI section 11: Clear conversation)."""
         self.state: str | None = None
         self.pending_amount = None
-        self.offered_amount = None  # an amount we suggested; the customer must accept it (FR-42)
         self.episode_messages: list[str] = []
 
     @property
     def awaiting_confirmation(self) -> bool:
-        return self.state == AWAITING_CONFIRMATION
+        """True while a refund waits on the customer's choice (confirmation or preferred method)."""
+        return self.state in WAITING_FOR_USER
 
     def _step(self, steps: list[str], line: str) -> None:
         steps.append(line)
@@ -124,18 +137,6 @@ class RefundAgent:
         steps: list[str] = []
         if self.state != AWAITING_AMOUNT:
             self.episode_messages = []
-            self.offered_amount = None
-        elif self.offered_amount is not None:
-            offered, self.offered_amount = self.offered_amount, None
-            answer = parse_confirmation(message)
-            if answer == "yes":  # the customer accepted the amount we offered
-                self._step(steps, f"[User] accepted offered amount {dollars(offered)}")
-                return self._after_validation(offered, steps)
-            if answer == "no":
-                self.state = REFUND_CANCELLED
-                self._step(steps, "[User] declined offered amount")
-                self._step(steps, f"[Agent] state={REFUND_CANCELLED}")
-                return AgentReply("Okay, no refund request was made.", self.state, steps)
         self.episode_messages.append(message)
         self.state = REFUND_REQUESTED
         self._step(steps, f"[Agent] state={REFUND_REQUESTED}")
@@ -161,10 +162,8 @@ class RefundAgent:
                         self._step(steps, f"[Guardrail] amount {amount} was not stated by the customer")
                         result = {"error": "The customer did not state this amount. Ask them which "
                                            "amount they want refunded. Do not guess."}
-                    elif self._amount_was_offered(amount):
-                        return self._offer_amount(amount, steps)
                     else:
-                        return self._after_validation(amount, steps)
+                        return self._after_validation(amount, steps, offered=self._amount_was_offered(amount))
                 else:
                     result = {"error": f"Unknown tool {call['name']}"}
                 messages.append(ToolMessage(json.dumps(result), tool_call_id=call["id"]))
@@ -188,21 +187,6 @@ class RefundAgent:
         stated = set().union(*(amounts_in(m) for m in self.episode_messages))
         return float(amount) not in stated
 
-    def _offer_amount(self, amount, steps: list[str]) -> AgentReply:
-        """FR-42: offer the one refundable recharge back to the customer.
-
-        At or below the limit, the confirmation card is that offer, so validate straight away.
-        Above it there is no confirmation step, so ask first instead of submitting on our own.
-        """
-        if float(amount) <= APPROVAL_LIMIT:
-            return self._after_validation(amount, steps)
-        self.state = AWAITING_AMOUNT
-        self.offered_amount = amount
-        self._step(steps, f"[Agent] offered amount {dollars(amount)}; awaiting_amount")
-        return AgentReply(f"The recharge I can see that's still refundable is **{dollars(amount)}**. "
-                          f"Do you want to request a refund of {dollars(amount)}? "
-                          "Reply **Yes, proceed** or **Cancel**.", self.state, steps, amount)
-
     def _ask_for_amount(self, text: str, steps: list[str]) -> AgentReply:
         self.state = AWAITING_AMOUNT
         self._step(steps, f"[Agent] state={AWAITING_AMOUNT}")
@@ -210,7 +194,9 @@ class RefundAgent:
         return AgentReply(text, self.state, steps)
 
     # ------------------------------------------------------------ deterministic part
-    def _after_validation(self, amount, steps: list[str]) -> AgentReply:
+    def _after_validation(self, amount, steps: list[str], offered: bool = False) -> AgentReply:
+        """offered=True when the customer named no amount and we picked the one refundable recharge
+        (FR-42). Both outcomes below wait for the customer's answer, so nothing happens unasked."""
         self._step(steps, f"[Agent] validate_refund(amount={amount})")
         check = self.tools.validate_refund(self.user_id, amount)
         self._step(steps, f"[Validation] eligible={check['eligible']} reason={check['reason']!r}")
@@ -229,51 +215,79 @@ class RefundAgent:
             self.pending_amount = amt
             self._step(steps, "[Agent] awaiting_user_confirmation")
             return AgentReply(f"**Refund eligible: {dollars(amt)}**\n\n"
-                              "Do you want to proceed with this refund? "
-                              "Reply **Yes, proceed** or **Cancel**.", self.state, steps, amt)
+                              "Do you want to proceed with this refund? You can get it back on your original "
+                              f"payment method or as a credit on your future bills. {CHOICES}",
+                              self.state, steps, amt)
 
-        # FR-37 to FR-40a: above the limit, hand to Support Team and stop. Never process_refund.
-        self._step(steps, f"[Agent] submit_to_support(amount={amt})")
-        sub = self.tools.submit_to_support(self.user_id, amt)
-        self.state = REFUND_SUBMITTED
-        self._step(steps, f"[Agent] state={REFUND_SUBMITTED}")
-        return AgentReply(f"Your refund request for {dollars(amt)} has been submitted to our Support Team "
-                          f"(request reference **{sub['request_id']}**). They will review the request and "
-                          "process it or take the necessary action.", self.state, steps, amt)
+        # FR-37 to FR-40a: above the limit it goes to the Support Team; never process_refund here.
+        # First ask how they'd like it, so nothing is submitted without the customer's answer.
+        self.state = AWAITING_METHOD
+        self.pending_amount = amt
+        self._step(steps, f"[Agent] state={AWAITING_METHOD}")
+        lead = f"The recharge I can see that's still refundable is **{dollars(amt)}**. " if offered else ""
+        return AgentReply(f"{lead}Refunds over {dollars(APPROVAL_LIMIT)} are reviewed by our Support Team. Before "
+                          f"I send your {dollars(amt)} request, how would you prefer to receive it if it's "
+                          f"approved: a refund to your original payment method, or a credit on your future "
+                          f"bills? {CHOICES}", self.state, steps, amt)
 
     # ------------------------------------------------------------ confirmation
     def resolve(self, message: str) -> AgentReply:
-        """Called only while awaiting confirmation. 'yes' executes, 'no' cancels, anything else re-asks."""
+        """Called only while a refund waits on the customer. 'yes' means original payment, 'credit'
+        means credit to future bills, 'no' cancels, anything else re-asks (FR-36c to FR-36e)."""
         steps: list[str] = []
         amt = self.pending_amount
         decision = parse_confirmation(message)
-        if self.state != AWAITING_CONFIRMATION or amt is None:
+        if self.state not in WAITING_FOR_USER or amt is None:
             return AgentReply("There's no refund waiting for confirmation.", self.state or "", steps)
 
         if decision is None:  # FR-36e
             self._step(steps, "[User] ambiguous confirmation")
-            return AgentReply(f"I need a clear answer before I make any refund. Do you want to proceed with "
-                              f"the {dollars(amt)} refund? Reply **Yes, proceed** or **Cancel**.",
+            return AgentReply(f"I need a clear answer before I go ahead with the {dollars(amt)} refund. {CHOICES}",
                               self.state, steps, amt)
 
         if decision == "no":  # FR-36d
             self._step(steps, "[User] cancelled")
+            was_support = self.state == AWAITING_METHOD
             self.state, self.pending_amount = REFUND_CANCELLED, None
             self._step(steps, f"[Agent] state={REFUND_CANCELLED}")
-            return AgentReply(f"Okay, I've cancelled the {dollars(amt)} refund. No refund was made.",
-                              self.state, steps, amt)
+            text = ("Okay, I haven't sent anything to the Support Team. No refund request was made."
+                    if was_support else f"Okay, I've cancelled the {dollars(amt)} refund. No refund was made.")
+            return AgentReply(text, self.state, steps, amt)
 
-        self._step(steps, "[User] confirmed")
-        self.state = REFUND_CONFIRMED
-        self._step(steps, f"[Agent] process_refund(amount={amt})")
-        result = self.tools.process_refund(self.user_id, amt)
+        method = BILL_CREDIT if decision == "credit" else ORIGINAL_PAYMENT
         self.pending_amount = None
+
+        if self.state == AWAITING_METHOD:
+            self._step(steps, f"[User] preferred method={method}")
+            self._step(steps, f"[Agent] submit_to_support(amount={amt}, preferred_method={method})")
+            sub = self.tools.submit_to_support(self.user_id, amt, method)
+            if not sub["submitted"]:
+                self.state = REFUND_REJECTED
+                self._step(steps, f"[Agent] state={REFUND_REJECTED}")
+                return AgentReply(f"I couldn't submit the request. {sub['reason']}\n\n{HELP}", self.state, steps, amt)
+            self.state = REFUND_SUBMITTED
+            self._step(steps, f"[Agent] state={REFUND_SUBMITTED}")
+            return AgentReply(f"Your refund request for {dollars(amt)} has been submitted to our Support Team "
+                              f"(request reference **{sub['request_id']}**), with your preference: "
+                              f"{METHOD_LABELS[method]}. They will review the request and process it or take "
+                              "the necessary action.", self.state, steps, amt)
+
+        self._step(steps, f"[User] confirmed method={method}")
+        self.state = REFUND_CONFIRMED
+        self._step(steps, f"[Agent] process_refund(amount={amt}, method={method})")
+        result = self.tools.process_refund(self.user_id, amt, method)
         if not result["success"]:
             self.state = REFUND_REJECTED
             self._step(steps, f"[Refund] failed reason={result['reason']!r}")
             return AgentReply(f"I couldn't process the refund. {result['reason']}\n\n{HELP}",
                               self.state, steps, amt)
         self.state = REFUND_PROCESSED
-        self._step(steps, "[Refund] success")
-        return AgentReply(f"Done! Your refund of {dollars(amt)} has been processed (simulated). "
-                          f"Refund reference: **{result['refund_id']}**.", self.state, steps, amt)
+        self._step(steps, f"[Refund] success method={method}")
+        if method == BILL_CREDIT:
+            return AgentReply(f"Done! {dollars(amt)} has been added as a credit on your account (simulated) and "
+                              f"will be applied to your future bills. Your credit balance is now "
+                              f"{dollars(result['bill_credit_balance'])}. Reference: **{result['refund_id']}**.",
+                              self.state, steps, amt)
+        return AgentReply(f"Done! Your refund of {dollars(amt)} to your original payment method has been "
+                          f"processed (simulated). Refund reference: **{result['refund_id']}**.",
+                          self.state, steps, amt)
