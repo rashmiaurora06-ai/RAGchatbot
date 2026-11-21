@@ -9,7 +9,7 @@ import streamlit as st
 import config
 from assistant import Assistant
 from chain import MissingAPIKey, log_event, new_id
-from refund import USERS, rupees
+from refund import USERS, dollars
 from retriever import missing_collections
 
 st.set_page_config(page_title="Telecom Customer Care", page_icon="📱", layout="centered")
@@ -83,7 +83,7 @@ with st.sidebar:
     with st.expander("Recharges on this account"):
         acct = st.session_state.assistant.tools.get_user_account(chosen)
         for r in acct["recharges"]:
-            st.caption(f"{rupees(r['recharge_amount'])} · {r['recharge_age_days']} days ago · "
+            st.caption(f"{dollars(r['recharge_amount'])} · {r['recharge_age_days']} days ago · "
                        f"{r['recharge_status']} · {r['refund_status']}")
     if st.button("🗑️ Clear conversation", use_container_width=True):  # FR-04, FR-48
         reset_conversation()
@@ -137,7 +137,7 @@ for m in st.session_state.messages:
 assistant = st.session_state.assistant
 if assistant.pending_refund is not None:
     with st.container(border=True):
-        st.markdown(f"**Refund eligible: {rupees(assistant.pending_refund)}**")
+        st.markdown(f"**Refund eligible: {dollars(assistant.pending_refund)}**")
         st.write("Do you want to proceed with this refund?")
         c1, c2 = st.columns(2)
         # The buttons send the same words a user could type, through the same confirmation check.

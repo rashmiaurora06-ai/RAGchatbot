@@ -30,18 +30,18 @@ HISTORY_EXCHANGES = 4
 SAMPLE_QUESTIONS = [
     "Why is my mobile internet so slow?",
     "Why is my bill higher than usual?",
-    "My eSIM QR code won't scan. What should I do?",
-    "How do I activate international roaming before a trip?",
-    "My calls keep going straight to voicemail.",
-    "I can't log in to the MyTelecom app.",
-    "My SIM shows 'not detected' after a restart.",
-    "How do I get an itemised bill?",
+    "How do I activate an eSIM?",
+    "How do I use my phone in another country?",
+    "How do I keep my number when switching to MyTelecom?",
+    "How do I unlock my phone to use another carrier?",
+    "How do I turn on Wi-Fi Calling?",
+    "How do I block spam and robocalls?",
 ]
 
 # agent_PRD section 8 demo prompts for the Refund Agent.
 REFUND_SAMPLES = [
-    "I want a refund of ₹499.",
-    "I want a refund of ₹999.",
-    "Give me a refund of ₹2,000.",
+    "I want a refund of $100.",
+    "I want a refund of $150.",
+    "Give me a refund of $2,000.",
     "I want a refund.",
 ]

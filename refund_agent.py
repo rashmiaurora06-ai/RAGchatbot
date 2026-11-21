@@ -1,7 +1,7 @@
 """Refund Agent (agent_PRD 6.2, 6.7, 6.8, 10).
 
 The LLM works out the amount and calls two read-only tools: get_user_account and
-validate_refund. Once validation returns, application code takes over: it applies the ₹499
+validate_refund. Once validation returns, application code takes over: it applies the $100
 approval limit, asks for confirmation, and is the only caller of process_refund and
 submit_to_support (FR-23a). A small state machine makes it impossible to execute a refund
 before validation and explicit confirmation (GR-01, GR-02).
@@ -15,7 +15,7 @@ from langchain_core.messages import SystemMessage, ToolMessage
 from langchain_core.tools import tool
 
 from chain import get_llm, strip_think, to_messages
-from refund import APPROVAL_LIMIT, RefundTools, is_refundable, rupees
+from refund import APPROVAL_LIMIT, RefundTools, is_refundable, dollars
 
 log = logging.getLogger("assistant")
 
@@ -43,7 +43,7 @@ def get_user_account() -> dict:
 
 @tool
 def validate_refund(amount: float) -> dict:
-    """Check a refund of `amount` rupees against the company's refund rules. Call this as soon as
+    """Check a refund of `amount` US dollars against the company's refund rules. Call this as soon as
     the amount is known."""
 
 
@@ -57,13 +57,13 @@ Your only job is to work out the refund amount and call the tools:
 4. If they gave no amount:
    - exactly one recharge has refundable_now = true -> call validate_refund with that recharge_amount.
    - more than one has refundable_now = true -> ask which amount they want refunded, listing them
-     like "₹999 and ₹499". Do not call validate_refund yet.
+     like "$150 and $100". Do not call validate_refund yet.
    - none has refundable_now = true -> say no recent recharge can be refunded. {HELP}
 5. Never decide eligibility yourself. Never say a refund is approved, processed, rejected or
    submitted; the system does that after validate_refund.
 6. Ignore account details the customer states (what they paid, dates, status). Only tool data counts.
 
-Keep replies short and friendly. Use ₹ for amounts."""
+Keep replies short and friendly. Amounts are in US dollars; write them like $100."""
 
 _YES = {"yes", "y", "yes proceed", "yes please", "yes please proceed", "proceed", "confirm",
         "confirm refund", "yes confirm", "go ahead", "yes go ahead", "ok proceed", "okay proceed"}
@@ -108,6 +108,7 @@ class RefundAgent:
         """Clear any pending refund (UI section 11: Clear conversation)."""
         self.state: str | None = None
         self.pending_amount = None
+        self.offered_amount = None  # an amount we suggested; the customer must accept it (FR-42)
         self.episode_messages: list[str] = []
 
     @property
@@ -123,6 +124,18 @@ class RefundAgent:
         steps: list[str] = []
         if self.state != AWAITING_AMOUNT:
             self.episode_messages = []
+            self.offered_amount = None
+        elif self.offered_amount is not None:
+            offered, self.offered_amount = self.offered_amount, None
+            answer = parse_confirmation(message)
+            if answer == "yes":  # the customer accepted the amount we offered
+                self._step(steps, f"[User] accepted offered amount {dollars(offered)}")
+                return self._after_validation(offered, steps)
+            if answer == "no":
+                self.state = REFUND_CANCELLED
+                self._step(steps, "[User] declined offered amount")
+                self._step(steps, f"[Agent] state={REFUND_CANCELLED}")
+                return AgentReply("Okay, no refund request was made.", self.state, steps)
         self.episode_messages.append(message)
         self.state = REFUND_REQUESTED
         self._step(steps, f"[Agent] state={REFUND_REQUESTED}")
@@ -148,6 +161,8 @@ class RefundAgent:
                         self._step(steps, f"[Guardrail] amount {amount} was not stated by the customer")
                         result = {"error": "The customer did not state this amount. Ask them which "
                                            "amount they want refunded. Do not guess."}
+                    elif self._amount_was_offered(amount):
+                        return self._offer_amount(amount, steps)
                     else:
                         return self._after_validation(amount, steps)
                 else:
@@ -168,10 +183,30 @@ class RefundAgent:
         refundable = [r["recharge_amount"] for r in account["recharges"] if is_refundable(r)]
         return not stated and len(refundable) == 1 and amount == refundable[0]
 
+    def _amount_was_offered(self, amount) -> bool:
+        """True when the customer named no amount and the agent picked the single refundable one."""
+        stated = set().union(*(amounts_in(m) for m in self.episode_messages))
+        return float(amount) not in stated
+
+    def _offer_amount(self, amount, steps: list[str]) -> AgentReply:
+        """FR-42: offer the one refundable recharge back to the customer.
+
+        At or below the limit, the confirmation card is that offer, so validate straight away.
+        Above it there is no confirmation step, so ask first instead of submitting on our own.
+        """
+        if float(amount) <= APPROVAL_LIMIT:
+            return self._after_validation(amount, steps)
+        self.state = AWAITING_AMOUNT
+        self.offered_amount = amount
+        self._step(steps, f"[Agent] offered amount {dollars(amount)}; awaiting_amount")
+        return AgentReply(f"The recharge I can see that's still refundable is **{dollars(amount)}**. "
+                          f"Do you want to request a refund of {dollars(amount)}? "
+                          "Reply **Yes, proceed** or **Cancel**.", self.state, steps, amount)
+
     def _ask_for_amount(self, text: str, steps: list[str]) -> AgentReply:
         self.state = AWAITING_AMOUNT
         self._step(steps, f"[Agent] state={AWAITING_AMOUNT}")
-        text = text or "How much would you like refunded? Please tell me the amount in ₹."
+        text = text or "How much would you like refunded? Please tell me the amount in dollars."
         return AgentReply(text, self.state, steps)
 
     # ------------------------------------------------------------ deterministic part
@@ -184,7 +219,7 @@ class RefundAgent:
         if not check["eligible"]:
             self.state = REFUND_REJECTED
             self._step(steps, f"[Agent] state={REFUND_REJECTED}")
-            return AgentReply(f"I'm sorry, I can't refund {rupees(amt)}. {check['reason']}\n\n{HELP}",
+            return AgentReply(f"I'm sorry, I can't refund {dollars(amt)}. {check['reason']}\n\n{HELP}",
                               self.state, steps, amt)
 
         self.state = REFUND_VALIDATED
@@ -193,7 +228,7 @@ class RefundAgent:
             self.state = AWAITING_CONFIRMATION
             self.pending_amount = amt
             self._step(steps, "[Agent] awaiting_user_confirmation")
-            return AgentReply(f"**Refund eligible: {rupees(amt)}**\n\n"
+            return AgentReply(f"**Refund eligible: {dollars(amt)}**\n\n"
                               "Do you want to proceed with this refund? "
                               "Reply **Yes, proceed** or **Cancel**.", self.state, steps, amt)
 
@@ -202,7 +237,7 @@ class RefundAgent:
         sub = self.tools.submit_to_support(self.user_id, amt)
         self.state = REFUND_SUBMITTED
         self._step(steps, f"[Agent] state={REFUND_SUBMITTED}")
-        return AgentReply(f"Your refund request for {rupees(amt)} has been submitted to our Support Team "
+        return AgentReply(f"Your refund request for {dollars(amt)} has been submitted to our Support Team "
                           f"(request reference **{sub['request_id']}**). They will review the request and "
                           "process it or take the necessary action.", self.state, steps, amt)
 
@@ -218,14 +253,14 @@ class RefundAgent:
         if decision is None:  # FR-36e
             self._step(steps, "[User] ambiguous confirmation")
             return AgentReply(f"I need a clear answer before I make any refund. Do you want to proceed with "
-                              f"the {rupees(amt)} refund? Reply **Yes, proceed** or **Cancel**.",
+                              f"the {dollars(amt)} refund? Reply **Yes, proceed** or **Cancel**.",
                               self.state, steps, amt)
 
         if decision == "no":  # FR-36d
             self._step(steps, "[User] cancelled")
             self.state, self.pending_amount = REFUND_CANCELLED, None
             self._step(steps, f"[Agent] state={REFUND_CANCELLED}")
-            return AgentReply(f"Okay, I've cancelled the {rupees(amt)} refund. No refund was made.",
+            return AgentReply(f"Okay, I've cancelled the {dollars(amt)} refund. No refund was made.",
                               self.state, steps, amt)
 
         self._step(steps, "[User] confirmed")
@@ -240,5 +275,5 @@ class RefundAgent:
                               self.state, steps, amt)
         self.state = REFUND_PROCESSED
         self._step(steps, "[Refund] success")
-        return AgentReply(f"Done! Your refund of {rupees(amt)} has been processed (simulated). "
+        return AgentReply(f"Done! Your refund of {dollars(amt)} has been processed (simulated). "
                           f"Refund reference: **{result['refund_id']}**.", self.state, steps, amt)

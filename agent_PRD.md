@@ -95,7 +95,7 @@ Why is my internet slow?
 ```
 
 ```text
-I want a refund of ₹999.
+I want a refund of $150.
 → refund_request
 ```
 
@@ -125,7 +125,7 @@ I want a refund of ₹999.
 | FR-16 | Treat the hard-coded user ID as if it came from authenticated session context |
 | FR-17 | The user must not be asked to provide the user ID                             |
 | FR-18 | Include recharge amount, status, age, and refund status in the simulated data |
-| FR-18a | Give the demonstration user two recharges: ₹499 and ₹999 |
+| FR-18a | Give the demonstration user two recharges: $100 and $150 |
 
 Example:
 
@@ -133,19 +133,19 @@ Example:
 USERS = {
     "user_123": {
         "name": "Rahul",
-        "plan": "Pro",
-        "plan_amount": 999,
+        "plan": "Unlimited Plus",
+        "plan_amount": 100,
         "recharges": [
             {
                 "recharge_id": "rch_456",
-                "recharge_amount": 999,
+                "recharge_amount": 150,
                 "recharge_status": "completed",
                 "recharge_age_days": 2,
                 "refund_status": "not_refunded"
             },
             {
                 "recharge_id": "rch_457",
-                "recharge_amount": 499,
+                "recharge_amount": 100,
                 "recharge_status": "completed",
                 "recharge_age_days": 1,
                 "refund_status": "not_refunded"
@@ -155,8 +155,8 @@ USERS = {
 }
 ```
 
-The ₹499 recharge is at the approval limit and can be refunded by the application.
-The ₹999 recharge is above it and goes to the Support Team (see 6.7).
+The $100 recharge is at the approval limit and can be refunded by the application.
+The $150 recharge is above it and goes to the Support Team (see 6.7).
 
 
 ---
@@ -195,8 +195,8 @@ Example validation result:
 {
     "eligible": True,
     "reason": "Refund is eligible.",
-    "requested_amount": 499,
-    "recharge_amount": 499,
+    "requested_amount": 100,
+    "recharge_amount": 100,
     "recharge_id": "rch_457"
 }
 ```
@@ -222,7 +222,7 @@ Example:
 {
     "success": True,
     "refund_id": "ref_789",
-    "amount": 499,
+    "amount": 100,
     "status": "refunded"
 }
 ```
@@ -233,22 +233,22 @@ Example:
 
 | ID    | Requirement                                                                                                                                                                        |
 | ----- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| FR-36 | Refunds of ₹499 or less require explicit user confirmation before execution                                                                                                        |
-| FR-36a | The ₹499 limit must be enforced in application code, not by the LLM                                                                                                               |
+| FR-36 | Refunds of $100 or less require explicit user confirmation before execution                                                                                                        |
+| FR-36a | The $100 limit must be enforced in application code, not by the LLM                                                                                                               |
 | FR-36b | The original refund request is not sufficient confirmation                                                                                                                        |
 | FR-36c | Only an explicit confirmation such as "Yes, proceed" allows execution                                                                                                             |
 | FR-36d | If the user rejects the refund, no refund is executed                                                                                                                             |
 | FR-36e | Ambiguous confirmation must not trigger execution; ask again instead                                                                                                              |
-| FR-37 | Refunds greater than ₹499 must not be processed automatically                                                                                                                      |
-| FR-38 | For refunds greater than ₹499, the Refund Agent submits the refund request to the Support Team for review                                                                          |
+| FR-37 | Refunds greater than $100 must not be processed automatically                                                                                                                      |
+| FR-38 | For refunds greater than $100, the Refund Agent submits the refund request to the Support Team for review                                                                          |
 | FR-39 | After submission, the Refund Agent must not call `process_refund`                                                                                                                  |
-| FR-40 | For refunds greater than ₹499, the agent responds that the request has been submitted to the Support Team, who will review it and process the request or take the necessary action |
+| FR-40 | For refunds greater than $100, the agent responds that the request has been submitted to the Support Team, who will review it and process the request or take the necessary action |
 | FR-40a | The agent must not claim that the refund has been approved, rejected, or processed by the Support Team. The Support Team review and subsequent processing are outside the scope of this application                                                                                        |
 
 **Flow:**
 
 ```text
-Refund ≤ ₹499
+Refund ≤ $100
 → Validate
 → Ask user confirmation
 → User confirms
@@ -256,7 +256,7 @@ Refund ≤ ₹499
 ```
 
 ```text
-Refund > ₹499
+Refund > $100
 → Validate
 → Submit request to Support Team
 → Inform user
@@ -267,7 +267,7 @@ Example:
 
 ```text
 User:
-I want a refund of ₹999.
+I want a refund of $150.
 
 Agent:
 Your refund request has been submitted to our Support Team.
@@ -296,7 +296,7 @@ User:
 I want a refund.
 
 Agent:
-I can see more than one recent recharge - ₹999 and ₹499.
+I can see more than one recent recharge - $150 and $100.
 Which amount would you like refunded?
 ```
 ---
@@ -347,7 +347,7 @@ Intent Detection
                    │
          ┌─────────┴─────────┐
          │                   │
-      ≤ ₹499              > ₹499
+      ≤ $100              > $100
          │                   │
          ▼                   ▼
     Confirmation      Submit to Support Team
@@ -372,7 +372,7 @@ Intent Detection
 ### Scenario 1 — Successful Refund
 
 ```text
-Recharge amount: ₹499
+Recharge amount: $100
 Recharge age: 1 day
 Recharge status: completed
 Refund status: not_refunded
@@ -381,7 +381,7 @@ Refund status: not_refunded
 User:
 
 ```text
-I want a refund of ₹499.
+I want a refund of $100.
 ```
 
 Expected:
@@ -390,9 +390,9 @@ Expected:
 refund_request
 → Refund Agent
 → Get account
-→ Validate ₹499
+→ Validate $100
 → Eligible
-→ At or below ₹499
+→ At or below $100
 → Ask confirmation
 → User confirms
 → Process refund
@@ -403,7 +403,7 @@ refund_request
 
 ```text
 User:
-Give me a refund of ₹2,000.
+Give me a refund of $2,000.
 ```
 
 Expected:
@@ -460,7 +460,7 @@ requirement_inquiry
 ### Scenario 6 — Refund Above the Approval Limit
 
 ```text
-Recharge amount: ₹999
+Recharge amount: $150
 Recharge age: 2 days
 Recharge status: completed
 Refund status: not_refunded
@@ -469,7 +469,7 @@ Refund status: not_refunded
 User:
 
 ```text
-I want a refund of ₹999.
+I want a refund of $150.
 ```
 
 Expected:
@@ -478,9 +478,9 @@ Expected:
 refund_request
 → Refund Agent
 → Get account
-→ Validate ₹999
+→ Validate $150
 → Eligible
-→ Above ₹499
+→ Above $100
 → Submit to Support Team
 → Submission response
 process_refund → not called
@@ -521,7 +521,7 @@ requirement_inquiry
 | GR-05 | Refund eligibility is determined by deterministic code                            |
 | GR-06 | Previously refunded recharge cannot be refunded again                             |
 | GR-07 | Refund execution is simulated only                                                |
-| GR-08 | Refunds above ₹499 cannot be executed by the application                          |
+| GR-08 | Refunds above $100 cannot be executed by the application                          |
 | GR-09 | The application must not simulate or report the Support Team's review outcome     |
 | GR-10 | Conversation history cannot override retrieved account data                       |
 
@@ -555,10 +555,10 @@ The existing Streamlit chat interface should be reused.
 
 No separate refund dashboard is required.
 
-For an eligible refund of ₹499 or less, show a clear confirmation step:
+For an eligible refund of $100 or less, show a clear confirmation step:
 
 ```text
-Refund eligible: ₹499
+Refund eligible: $100
 
 Do you want to proceed with this refund?
 
@@ -567,7 +567,7 @@ Do you want to proceed with this refund?
 
 If buttons are difficult to integrate with the existing chat flow, explicit natural-language confirmation may be used.
 
-For a refund above ₹499, show no confirmation step. There is nothing for the user to
+For a refund above $100, show no confirmation step. There is nothing for the user to
 approve, so the agent reports the submission and the turn ends.
 
 Clear conversation must reset the conversation history and any pending refund.
@@ -581,11 +581,11 @@ Log the major workflow steps:
 ```text
 [Intent] refund_request
 [Agent] get_user_account
-[Agent] validate_refund(amount=499)
+[Agent] validate_refund(amount=100)
 [Validation] eligible=True
 [Agent] awaiting_user_confirmation
 [User] confirmed
-[Agent] process_refund(amount=499)
+[Agent] process_refund(amount=100)
 [Refund] success
 ```
 
@@ -624,12 +624,12 @@ Do not introduce a multi-agent architecture.
 * [ ] Refunds older than 7 days are rejected
 * [ ] Already-refunded recharges are rejected
 * [ ] Invalid refunds never call `process_refund`
-* [ ] Eligible refunds of ₹499 or less require explicit user confirmation
+* [ ] Eligible refunds of $100 or less require explicit user confirmation
 * [ ] Refund is processed only after confirmation
 * [ ] Simulated refund state is updated after execution
 * [ ] Successful refund returns a simulated refund reference
-* [ ] Refunds above ₹499 are submitted to the Support Team
-* [ ] Refunds above ₹499 never call `process_refund`
+* [ ] Refunds above $100 are submitted to the Support Team
+* [ ] Refunds above $100 never call `process_refund`
 * [ ] The agent never claims a Support Team approval, rejection, or outcome
 * [ ] Refunding one recharge leaves the other recharge refundable
 * [ ] Missing refund amount is handled correctly
@@ -714,7 +714,7 @@ The updated architecture should be:
                      │                       │   │
                      ▼                       ▼   │
              Human Confirmation      Submit to Support Team
-                (≤ ₹499)                  (> ₹499)
+                (≤ $100)                  (> $100)
                      │                       │
                      ▼                       │
               Process Refund ────────────────┤

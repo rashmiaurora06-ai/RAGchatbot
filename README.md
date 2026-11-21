@@ -1,5 +1,9 @@
 # RAG Telecom Customer Care Chatbot
 
+A support assistant for **MyTelecom**, a fictional US mobile carrier. Its policies and prices are
+modelled on common US carrier practice (5G/5G+, Number Transfer PINs, Wi-Fi Calling and E911,
+International Day Pass, unlocking rules). Amounts are in US dollars.
+
 A chatbot that answers Tier-1 telecom support questions using only three knowledge
 sources: the FAQ, resolved support tickets and the technical PDF guide. Built to
 [PRD.md](PRD.md).
@@ -33,6 +37,15 @@ Then put your Groq key in `.env` (`GROQ_API_KEY=...`).
 
 ## Build the knowledge base
 
+`data/faq.csv` is edited by hand. `build_us_data.py` regenerates `data/tickets.db` and
+`data/telecom_guide.pdf` (no extra dependencies):
+
+```bash
+.venv/bin/python build_us_data.py
+```
+
+Then embed and index everything:
+
 ```bash
 .venv/bin/python ingest_all.py
 ```
@@ -43,9 +56,9 @@ downloads on the first run. The app reads the stored collections and doesn't re-
 
 | Collection | Source | Documents |
 |---|---|---|
-| `faq` | `data/faq.csv` | 1 per row (25) |
-| `tickets` | `data/tickets.db` | 1 per **resolved** ticket (19; the 1 escalated ticket is skipped) |
-| `guides` | `data/telecom_guide.pdf` | 600-char chunks, 100-char overlap (36) |
+| `faq` | `data/faq.csv` | 1 per row (30) |
+| `tickets` | `data/tickets.db` | 1 per **resolved** ticket (21; the 1 escalated ticket is skipped) |
+| `guides` | `data/telecom_guide.pdf` | 600-char chunks, 100-char overlap (19) |
 
 ## Run
 
@@ -84,18 +97,18 @@ The agent is an LLM tool-calling loop that can call only `get_user_account` and
 | Outcome | What happens |
 |---|---|
 | Not eligible (too old, already refunded, more than the recharge, ≤ 0) | Rejected with the reason |
-| Eligible, ₹499 or less | Confirmation card (**Confirm Refund** / **Cancel**, or type "Yes, proceed"), then `process_refund` |
-| Eligible, above ₹499 | `submit_to_support`, the user is told Support will review it, turn ends |
+| Eligible, $100 or less | Confirmation card (**Confirm Refund** / **Cancel**, or type "Yes, proceed"), then `process_refund` |
+| Eligible, above $100 | `submit_to_support`, the user is told Support will review it, turn ends |
 
-Guardrails live in code, not the prompt. `refund.py` holds the rules, the ₹499 limit, the
+Guardrails live in code, not the prompt. `refund.py` holds the rules, the $100 limit, the
 simulated accounts and all four tools. `process_refund` and `submit_to_support` are never
 offered to the LLM, and both re-validate before acting. A state machine only runs a refund
 from `awaiting_confirmation` after an exact "yes" phrase; anything ambiguous gets asked again.
 The agent may only use an amount the customer actually typed, or the single refundable
 recharge when they gave none.
 
-- The demo user is `user_123` (Rahul: ₹999 and ₹499 recharges). The sidebar can switch to
-  `user_234`, whose ₹299 recharge is 15 days old, to demo the 7-day window.
+- The demo user is `user_123` (Rahul: $150 and $100 recharges). The sidebar can switch to
+  `user_234`, whose $50 recharge is 15 days old, to demo the 7-day window.
 - Refunds are simulated and stored per browser session. No billing system is called.
 - The last 4 exchanges are passed as context to both routes. Retrieval still uses only the
   current question. **Clear conversation** resets the history and any pending refund.

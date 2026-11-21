@@ -6,7 +6,7 @@ Everything here is deterministic application code. The LLM never decides eligibi
 import copy
 import uuid
 
-APPROVAL_LIMIT = 499       # FR-36: refunds at or below this need user confirmation; above go to support
+APPROVAL_LIMIT = 100       # FR-36: refunds of $100 or less need user confirmation; above go to support
 REFUND_WINDOW_DAYS = 7     # FR-25
 
 # The hard-coded user stands in for the signed-in session user (FR-15, FR-16).
@@ -16,21 +16,21 @@ DEMO_USER_ID = "user_123"
 USERS = {
     "user_123": {
         "name": "Rahul",
-        "plan": "Pro",
-        "plan_amount": 999,
+        "plan": "Unlimited Plus",
+        "plan_amount": 100,
         "recharges": [
-            {"recharge_id": "rch_456", "recharge_amount": 999, "recharge_status": "completed",
+            {"recharge_id": "rch_456", "recharge_amount": 150, "recharge_status": "completed",
              "recharge_age_days": 2, "refund_status": "not_refunded"},
-            {"recharge_id": "rch_457", "recharge_amount": 499, "recharge_status": "completed",
+            {"recharge_id": "rch_457", "recharge_amount": 100, "recharge_status": "completed",
              "recharge_age_days": 1, "refund_status": "not_refunded"},
         ],
     },
     "user_234": {
         "name": "Priya",
-        "plan": "Basic",
-        "plan_amount": 299,
+        "plan": "Unlimited Starter",
+        "plan_amount": 50,
         "recharges": [
-            {"recharge_id": "rch_610", "recharge_amount": 299, "recharge_status": "completed",
+            {"recharge_id": "rch_610", "recharge_amount": 50, "recharge_status": "completed",
              "recharge_age_days": 15, "refund_status": "not_refunded"},
         ],
     },
@@ -38,12 +38,13 @@ USERS = {
 
 
 def _num(amount):
-    """Show 499.0 as 499."""
+    """Show 100.0 as 100."""
     return int(amount) if float(amount).is_integer() else round(float(amount), 2)
 
 
-def rupees(amount) -> str:
-    return f"₹{_num(amount):,}"
+def dollars(amount) -> str:
+    n = _num(amount)
+    return f"${n:,}" if isinstance(n, int) else f"${n:,.2f}"
 
 
 def is_refundable(r: dict) -> bool:
@@ -115,14 +116,14 @@ class RefundTools:
         result.update(recharge_amount=r["recharge_amount"], recharge_id=r["recharge_id"])
 
         if amount > r["recharge_amount"]:
-            reason = (f"The requested amount ({rupees(amount)}) exceeds the recharge amount "
-                      f"({rupees(r['recharge_amount'])}).")
+            reason = (f"The requested amount ({dollars(amount)}) exceeds the recharge amount "
+                      f"({dollars(r['recharge_amount'])}).")
         elif r["refund_status"] == "refunded":
-            reason = f"The {rupees(r['recharge_amount'])} recharge has already been refunded."
+            reason = f"The {dollars(r['recharge_amount'])} recharge has already been refunded."
         elif r["recharge_status"] != "completed":
-            reason = f"The {rupees(r['recharge_amount'])} recharge is not completed, so it can't be refunded."
+            reason = f"The {dollars(r['recharge_amount'])} recharge is not completed, so it can't be refunded."
         elif r["recharge_age_days"] > REFUND_WINDOW_DAYS:
-            reason = (f"The {rupees(r['recharge_amount'])} recharge was made {r['recharge_age_days']} days "
+            reason = (f"The {dollars(r['recharge_amount'])} recharge was made {r['recharge_age_days']} days "
                       f"ago, outside the {REFUND_WINDOW_DAYS}-day refund window.")
         else:
             return {**result, "eligible": True, "reason": "Refund is eligible."}

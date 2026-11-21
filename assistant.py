@@ -47,6 +47,8 @@ class Assistant:
         # A clear yes/no while a refund is waiting goes straight to the agent's state machine.
         if self.agent.awaiting_confirmation and parse_confirmation(message):
             return self._refund_turn(self.agent.resolve(message), ["[Intent] refund_confirmation"])
+        if self.agent.offered_amount is not None and parse_confirmation(message):
+            return self._refund_turn(self.agent.handle(message, history), ["[Intent] refund_confirmation"])
 
         intent = classify(message, history)
         steps = [f"[Intent] {intent}"]

@@ -24,7 +24,7 @@ PROMPT = """You classify the customer's LATEST message for a mobile telecom supp
 
 - refund_request: the customer wants a refund, or wants a recharge cancelled or reversed, now.
   Also refund_request when the assistant just asked about a refund (which amount, or whether to
-  proceed) and the customer is answering that, e.g. "the 499 one" or "₹999".
+  proceed) and the customer is answering that, e.g. "the $100 one" or "$150".
 - requirement_inquiry: everything else, including questions ABOUT refunds or cancellations
   (e.g. "How do I cancel a recharge?", "What is the refund policy?") and all support questions.
 
