@@ -1,7 +1,7 @@
-# RAG Telecom Customer Care Chatbot
+# US Telecom Customer Care Assistant (RAG chatbot)
 
-A support assistant for **MyTelecom**, a fictional US mobile carrier. Its policies and prices are
-modelled on common US carrier practice (5G/5G+, Number Transfer PINs, Wi-Fi Calling and E911,
+A support assistant for **MyTelecom**, a fictional US mobile carrier. Its policies and prices are fictional,
+modelled on common practice at US carriers such as AT&T (5G/5G+, Number Transfer PINs, Wi-Fi Calling and E911,
 International Day Pass, unlocking rules). Amounts are in US dollars.
 
 A chatbot that answers Tier-1 telecom support questions using only three knowledge

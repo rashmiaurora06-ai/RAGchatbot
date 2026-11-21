@@ -17,7 +17,7 @@ def main() -> None:
     session_id = new_id()
     assistant = Assistant()
     history: list[dict] = []
-    print("Telecom Customer Care Assistant. Ask a question, or type 'quit' to exit.\n")
+    print("US Telecom Customer Care Assistant. Ask a question, or type 'quit' to exit.\n")
     while True:
         try:
             question = input("You: ").strip()

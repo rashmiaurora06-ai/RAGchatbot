@@ -12,7 +12,7 @@ from chain import MissingAPIKey, log_event, new_id
 from refund import USERS, dollars
 from retriever import missing_collections
 
-st.set_page_config(page_title="Telecom Customer Care", page_icon="📱", layout="centered")
+st.set_page_config(page_title="US Telecom Customer Care", page_icon="📱", layout="centered")
 
 if "session_id" not in st.session_state:
     st.session_state.session_id = new_id()
@@ -90,7 +90,7 @@ with st.sidebar:
         st.rerun()
     st.caption("Need a person? Call **611** (free from your mobile) or use the MyTelecom app.")
 
-st.title("Telecom Customer Care Assistant")
+st.title("US Telecom Customer Care Assistant")
 
 @st.cache_resource(show_spinner=False)
 def build_knowledge_base(names: tuple[str, ...]) -> None:

@@ -1,11 +1,12 @@
-# Telecom Customer Care Assistant (RAG Chatbot)
+# US Telecom Customer Care Assistant (RAG Chatbot)
 
 ![Thumbnail](thumbnail.png)
 
 ## Short info
 An AI support chatbot that answers Tier-1 telecom questions (mobile data, bills, SIM/eSIM, roaming,
 calls, the MyTelecom app) using **only** the company's own knowledge: the FAQ, past resolved
-support tickets and the technical PDF guide. Every answer shows its sources.
+support tickets and the technical PDF guide. Every answer shows its sources. The carrier
+("MyTelecom") and its policies are fictional, modeled on US carriers such as AT&T.
 
 ## Project description
 Customer care teams get the same questions again and again, and generic LLM chatbots make up
