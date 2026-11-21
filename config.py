@@ -24,6 +24,9 @@ LLM_MODEL = "qwen/qwen3.8-27b"
 LLM_TEMPERATURE = 0              # FR-12
 LLM_REASONING_EFFORT = "none"    # FR-13
 
+# agent_PRD FR-50: how many recent user/assistant exchanges are passed as context.
+HISTORY_EXCHANGES = 4
+
 SAMPLE_QUESTIONS = [
     "Why is my mobile internet so slow?",
     "Why is my bill higher than usual?",
@@ -33,4 +36,12 @@ SAMPLE_QUESTIONS = [
     "I can't log in to the MyTelecom app.",
     "My SIM shows 'not detected' after a restart.",
     "How do I get an itemised bill?",
+]
+
+# agent_PRD section 8 demo prompts for the Refund Agent.
+REFUND_SAMPLES = [
+    "I want a refund of ₹499.",
+    "I want a refund of ₹999.",
+    "Give me a refund of ₹2,000.",
+    "I want a refund.",
 ]

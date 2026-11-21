@@ -10,8 +10,9 @@ import uuid
 from collections.abc import Iterator
 
 from dotenv import load_dotenv
+from langchain_core.messages import AIMessage, BaseMessage, HumanMessage
 from langchain_core.output_parsers import StrOutputParser
-from langchain_core.prompts import ChatPromptTemplate
+from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 from langchain_groq import ChatGroq
 
 import config
@@ -37,6 +38,7 @@ CONTEXT
 
 PROMPT = ChatPromptTemplate.from_messages([
     ("system", SYSTEM_PROMPT),
+    MessagesPlaceholder("history", optional=True),  # agent_PRD FR-46: recent conversation
     ("human", "{question}"),
 ])
 
@@ -47,23 +49,44 @@ class MissingAPIKey(RuntimeError):
     pass
 
 
+_llms: dict = {}
 _chain = None
-_chain_key = None
+_chain_llm = None
 
 
-def get_chain():
-    """Build the chain, and rebuild it whenever the key in .env changes (no restart needed)."""
-    global _chain, _chain_key
+def get_llm(streaming: bool = False) -> ChatGroq:
+    """The one LLM configuration, shared by RAG, intent detection and the Refund Agent.
+    Rebuilt whenever the key in .env changes (no restart needed)."""
     load_dotenv(config.ROOT / ".env", override=True)
     key = os.environ.get("GROQ_API_KEY", "").strip()
     if not key:
         raise MissingAPIKey("GROQ_API_KEY is not set. Copy .env.example to .env and add your key.")
-    if _chain is None or key != _chain_key:
-        llm = ChatGroq(model=config.LLM_MODEL, temperature=config.LLM_TEMPERATURE,
-                       reasoning_effort=config.LLM_REASONING_EFFORT, streaming=True, api_key=key)
+    if _llms.get(("key", streaming)) != key:
+        _llms[streaming] = ChatGroq(model=config.LLM_MODEL, temperature=config.LLM_TEMPERATURE,
+                                    reasoning_effort=config.LLM_REASONING_EFFORT,
+                                    streaming=streaming, api_key=key)
+        _llms[("key", streaming)] = key
+    return _llms[streaming]
+
+
+def get_chain():
+    global _chain, _chain_llm
+    llm = get_llm(streaming=True)
+    if _chain is None or llm is not _chain_llm:
         _chain = PROMPT | llm | StrOutputParser()
-        _chain_key = key
+        _chain_llm = llm
     return _chain
+
+
+def to_messages(history: list[dict] | None) -> list[BaseMessage]:
+    """[{role, content}] -> LangChain messages, keeping only the last HISTORY_EXCHANGES (FR-50)."""
+    recent = (history or [])[-2 * config.HISTORY_EXCHANGES:]
+    return [HumanMessage(m["content"]) if m["role"] == "user" else AIMessage(m["content"])
+            for m in recent if m.get("content")]
+
+
+def strip_think(text: str) -> str:
+    return _THINK.sub("", text or "").strip()
 
 
 def sources_from(results: dict) -> list[dict]:
@@ -76,8 +99,11 @@ def sources_from(results: dict) -> list[dict]:
     return out
 
 
-def stream_answer(question: str) -> tuple[list[dict], Iterator[str]]:
-    """Retrieve, then return (sources, token stream)."""
+def stream_answer(question: str, history: list[dict] | None = None) -> tuple[list[dict], Iterator[str]]:
+    """Retrieve, then return (sources, token stream).
+
+    History is passed to the LLM as context only; retrieval still uses just the question (FR-49).
+    """
     results = retrieve(question)
     context = format_context(results)
     chain = get_chain()
@@ -85,7 +111,8 @@ def stream_answer(question: str) -> tuple[list[dict], Iterator[str]]:
     def tokens() -> Iterator[str]:
         # Some reasoning models emit <think>...</think>; hide it if it ever appears.
         buf, in_think = "", False
-        for piece in chain.stream({"context": context, "question": question}):
+        for piece in chain.stream({"context": context, "question": question,
+                                   "history": to_messages(history)}):
             buf += piece
             if not in_think and "<think>" in buf:
                 in_think = True

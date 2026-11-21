@@ -70,6 +70,45 @@ CLI (type `quit` to exit):
 3. The answer streams token by token. A **Sources** expander lists all 9 retrieved documents.
 4. 👍 / 👎 ratings, questions, answers, sources and latency are written to `logs/interactions.jsonl`.
 
+## Refund Agent (agentic capability)
+
+Built to [agent_PRD.md](agent_PRD.md). Every message first goes through **intent detection**
+(`intent.py`, same Groq model, structured output):
+
+- `requirement_inquiry` → the existing RAG pipeline, unchanged.
+- `refund_request` → the **Refund Agent** (`refund_agent.py`).
+
+The agent is an LLM tool-calling loop that can call only `get_user_account` and
+`validate_refund`. As soon as validation returns, application code takes over:
+
+| Outcome | What happens |
+|---|---|
+| Not eligible (too old, already refunded, more than the recharge, ≤ 0) | Rejected with the reason |
+| Eligible, ₹499 or less | Confirmation card (**Confirm Refund** / **Cancel**, or type "Yes, proceed"), then `process_refund` |
+| Eligible, above ₹499 | `submit_to_support`, the user is told Support will review it, turn ends |
+
+Guardrails live in code, not the prompt. `refund.py` holds the rules, the ₹499 limit, the
+simulated accounts and all four tools. `process_refund` and `submit_to_support` are never
+offered to the LLM, and both re-validate before acting. A state machine only runs a refund
+from `awaiting_confirmation` after an exact "yes" phrase; anything ambiguous gets asked again.
+The agent may only use an amount the customer actually typed, or the single refundable
+recharge when they gave none.
+
+- The demo user is `user_123` (Rahul: ₹999 and ₹499 recharges). The sidebar can switch to
+  `user_234`, whose ₹299 recharge is 15 days old, to demo the 7-day window.
+- Refunds are simulated and stored per browser session. No billing system is called.
+- The last 4 exchanges are passed as context to both routes. Retrieval still uses only the
+  current question. **Clear conversation** resets the history and any pending refund.
+- Each refund answer has an **Agent steps** expander (`[Intent] …`, `[Agent] validate_refund(…)`, …).
+  Steps are also written to `logs/interactions.jsonl`.
+- In the CLI, type `clear` to reset the conversation.
+
+Rule and state-machine tests (no API calls):
+
+```bash
+.venv/bin/python test_refund.py
+```
+
 ## Updating knowledge (support ops)
 
 - Edit `data/faq.csv`, then run `.venv/bin/python ingest_faq.py`.
